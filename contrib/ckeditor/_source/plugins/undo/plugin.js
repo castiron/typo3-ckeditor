@@ -1,5 +1,5 @@
 ﻿/*
-Copyright (c) 2003-2009, CKSource - Frederico Knabben. All rights reserved.
+Copyright (c) 2003-2011, CKSource - Frederico Knabben. All rights reserved.
 For licensing, see LICENSE.html or http://ckeditor.com/license
 */
 
@@ -64,9 +64,9 @@ For licensing, see LICENSE.html or http://ckeditor.com/license
 			editor.on( 'afterCommandExec', recordCommand );
 
 			// Save snapshots before doing custom changes.
-			editor.on( 'saveSnapshot', function()
+			editor.on( 'saveSnapshot', function( evt )
 				{
-					undoManager.save();
+					undoManager.save( evt.data && evt.data.contentOnly );
 				});
 
 			// Registering keydown on every document recreation.(#3844)
@@ -90,7 +90,7 @@ For licensing, see LICENSE.html or http://ckeditor.com/license
 			// Make the undo manager available only in wysiwyg mode.
 			editor.on( 'mode', function()
 				{
-					undoManager.enabled = editor.mode == 'wysiwyg';
+					undoManager.enabled = editor.readOnly ? false : editor.mode == 'wysiwyg';
 					undoManager.onChange();
 				});
 
@@ -114,27 +114,72 @@ For licensing, see LICENSE.html or http://ckeditor.com/license
 				// Create the first image.
 				editor.fire( 'saveSnapshot' );
 			};
+
+			/**
+			 * Amend the top of undo stack (last undo image) with the current DOM changes.
+			 * @name CKEDITOR.editor#updateUndo
+			 * @example
+			 * function()
+			 * {
+			 *  editor.fire( 'saveSnapshot' );
+			 * 	editor.document.body.append(...);
+			 *  // Make new changes following the last undo snapshot part of it.
+			 * 	editor.fire( 'updateSnapshot' );
+			 * ...
+			 * }
+			 */
+			editor.on( 'updateSnapshot', function()
+			{
+				if ( undoManager.currentImage )
+					undoManager.update();
+			});
 		}
 	});
 
-	// Gets a snapshot image which represent the current document status.
-	function Image( editor )
-	{
-		var selection = editor.getSelection();
+	CKEDITOR.plugins.undo = {};
 
-		this.contents	= editor.getSnapshot();
-		this.bookmarks	= selection && selection.createBookmarks2( true );
+	/**
+	 * Undo snapshot which represents the current document status.
+	 * @name CKEDITOR.plugins.undo.Image
+	 * @param editor The editor instance on which the image is created.
+	 */
+	var Image = CKEDITOR.plugins.undo.Image = function( editor )
+	{
+		this.editor = editor;
+
+		editor.fire( 'beforeUndoImage' );
+
+		var contents = editor.getSnapshot(),
+			selection	= contents && editor.getSelection();
 
 		// In IE, we need to remove the expando attributes.
-		if ( CKEDITOR.env.ie )
-			this.contents = this.contents.replace( /\s+_cke_expando=".*?"/g, '' );
-	}
+		CKEDITOR.env.ie && contents && ( contents = contents.replace( /\s+data-cke-expando=".*?"/g, '' ) );
+
+		this.contents	= contents;
+		this.bookmarks	= selection && selection.createBookmarks2( true );
+
+		editor.fire( 'afterUndoImage' );
+	};
+
+	// Attributes that browser may changing them when setting via innerHTML.
+	var protectedAttrs = /\b(?:href|src|name)="[^"]*?"/gi;
 
 	Image.prototype =
 	{
 		equals : function( otherImage, contentOnly )
 		{
-			if ( this.contents != otherImage.contents )
+
+			var thisContents = this.contents,
+				otherContents = otherImage.contents;
+
+			// For IE6/7 : Comparing only the protected attribute values but not the original ones.(#4522)
+			if ( CKEDITOR.env.ie && ( CKEDITOR.env.ie7Compat || CKEDITOR.env.ie6Compat ) )
+			{
+				thisContents = thisContents.replace( protectedAttrs, '' );
+				otherContents = otherContents.replace( protectedAttrs, '' );
+			}
+
+			if ( thisContents != otherContents )
 				return false;
 
 			if ( contentOnly )
@@ -179,6 +224,11 @@ For licensing, see LICENSE.html or http://ckeditor.com/license
 		this.reset();
 	}
 
+
+	var editingKeyCodes = { /*Backspace*/ 8:1, /*Delete*/ 46:1 },
+		modifierKeyCodes = { /*Shift*/ 16:1, /*Ctrl*/ 17:1, /*Alt*/ 18:1 },
+		navigationKeyCodes = { 37:1, 38:1, 39:1, 40:1 };  // Arrows: L, T, R, B
+
 	UndoManager.prototype =
 	{
 		/**
@@ -187,32 +237,26 @@ For licensing, see LICENSE.html or http://ckeditor.com/license
 		 */
 		type : function( event )
 		{
-			var keystroke = event && event.data.getKeystroke(),
-
-				// Backspace, Delete
-				modifierCodes = { 8:1, 46:1 },
-				// Keystrokes which will modify the contents.
-				isModifier = keystroke in modifierCodes,
-				wasModifier = this.lastKeystroke in modifierCodes,
-				lastWasSameModifier = isModifier && keystroke == this.lastKeystroke,
-
-				// Arrows: L, T, R, B
-				resetTypingCodes = { 37:1, 38:1, 39:1, 40:1 },
+			var keystroke = event && event.data.getKey(),
+				isModifierKey = keystroke in modifierKeyCodes,
+				isEditingKey = keystroke in editingKeyCodes,
+				wasEditingKey = this.lastKeystroke in editingKeyCodes,
+				sameAsLastEditingKey = isEditingKey && keystroke == this.lastKeystroke,
 				// Keystrokes which navigation through contents.
-				isReset = keystroke in resetTypingCodes,
-				wasReset = this.lastKeystroke in resetTypingCodes,
+				isReset = keystroke in navigationKeyCodes,
+				wasReset = this.lastKeystroke in navigationKeyCodes,
 
 				// Keystrokes which just introduce new contents.
-				isContent = ( !isModifier && !isReset ),
+				isContent = ( !isEditingKey && !isReset ),
 
 				// Create undo snap for every different modifier key.
-				modifierSnapshot = ( isModifier && !lastWasSameModifier ),
+				modifierSnapshot = ( isEditingKey && !sameAsLastEditingKey ),
 				// Create undo snap on the following cases:
-				// 1. Just start to type.
+				// 1. Just start to type .
 				// 2. Typing some content after a modifier.
 				// 3. Typing some content after make a visible selection.
-				startedTyping = !this.typing
-					|| ( isContent && ( wasModifier || wasReset ) );
+				startedTyping = !( isModifierKey || this.typing )
+					|| ( isContent && ( wasEditingKey || wasReset ) );
 
 			if ( startedTyping || modifierSnapshot )
 			{
@@ -226,10 +270,13 @@ For licensing, see LICENSE.html or http://ckeditor.com/license
 
 						// In IE, we need to remove the expando attributes.
 						if ( CKEDITOR.env.ie )
-							currentSnapshot = currentSnapshot.replace( /\s+_cke_expando=".*?"/g, '' );
+							currentSnapshot = currentSnapshot.replace( /\s+data-cke-expando=".*?"/g, '' );
 
 						if ( beforeTypeImage.contents != currentSnapshot )
 						{
+							// It's safe to now indicate typing state.
+							this.typing = true;
+
 							// This's a special save, with specified snapshot
 							// and without auto 'fireChange'.
 							if ( !this.save( false, beforeTypeImage, false ) )
@@ -250,15 +297,16 @@ For licensing, see LICENSE.html or http://ckeditor.com/license
 			}
 
 			this.lastKeystroke = keystroke;
+
 			// Create undo snap after typed too much (over 25 times).
-			if ( isModifier )
+			if ( isEditingKey )
 			{
 				this.typesCount = 0;
 				this.modifiersCount++;
 
 				if ( this.modifiersCount > 25 )
 				{
-					this.save();
+					this.save( false, null, false );
 					this.modifiersCount = 1;
 				}
 			}
@@ -269,12 +317,11 @@ For licensing, see LICENSE.html or http://ckeditor.com/license
 
 				if ( this.typesCount > 25 )
 				{
-					this.save();
+					this.save( false, null, false );
 					this.typesCount = 1;
 				}
 			}
 
-			this.typing = true;
 		},
 
 		reset : function()	// Reset the undo stack.
@@ -295,7 +342,7 @@ For licensing, see LICENSE.html or http://ckeditor.com/license
 			 */
 			this.index = -1;
 
-			this.limit = this.editor.config.undoStackSize;
+			this.limit = this.editor.config.undoStackSize || 20;
 
 			this.currentImage = null;
 
@@ -336,6 +383,10 @@ For licensing, see LICENSE.html or http://ckeditor.com/license
 			if ( !image )
 				image = new Image( this.editor );
 
+			// Do nothing if it was not possible to retrieve an image.
+			if ( image.contents === false )
+				return false;
+
 			// Check if this is a duplicate. In such case, do nothing.
 			if ( this.currentImage && image.equals( this.currentImage, onContentOnly ) )
 				return false;
@@ -375,8 +426,10 @@ For licensing, see LICENSE.html or http://ckeditor.com/license
 
 			this.index = image.index;
 
-			this.currentImage = image;
-
+			// Update current image with the actual editor
+			// content, since actualy content may differ from
+			// the original snapshot due to dom change. (#4622)
+			this.update();
 			this.fireChange();
 		},
 
@@ -475,6 +528,14 @@ For licensing, see LICENSE.html or http://ckeditor.com/license
 			}
 
 			return false;
+		},
+
+		/**
+		 * Update the last snapshot of the undo stack with the current editor content.
+		 */
+		update : function()
+		{
+			this.snapshots.splice( this.index, 1, ( this.currentImage = new Image( this.editor ) ) );
 		}
 	};
 })();
@@ -482,9 +543,36 @@ For licensing, see LICENSE.html or http://ckeditor.com/license
 /**
  * The number of undo steps to be saved. The higher this setting value the more
  * memory is used for it.
+ * @name CKEDITOR.config.undoStackSize
  * @type Number
  * @default 20
  * @example
  * config.undoStackSize = 50;
  */
-CKEDITOR.config.undoStackSize = 20;
+
+/**
+ * Fired when the editor is about to save an undo snapshot. This event can be
+ * fired by plugins and customizations to make the editor saving undo snapshots.
+ * @name CKEDITOR.editor#saveSnapshot
+ * @event
+ */
+
+/**
+ * Fired before an undo image is to be taken. An undo image represents the
+ * editor state at some point. It's saved into an undo store, so the editor is
+ * able to recover the editor state on undo and redo operations.
+ * @name CKEDITOR.editor#beforeUndoImage
+ * @since 3.5.3
+ * @see CKEDITOR.editor#afterUndoImage
+ * @event
+ */
+
+/**
+ * Fired after an undo image is taken. An undo image represents the
+ * editor state at some point. It's saved into an undo store, so the editor is
+ * able to recover the editor state on undo and redo operations.
+ * @name CKEDITOR.editor#afterUndoImage
+ * @since 3.5.3
+ * @see CKEDITOR.editor#beforeUndoImage
+ * @event
+ */

@@ -1,77 +1,74 @@
 ﻿/*
-Copyright (c) 2003-2009, CKSource - Frederico Knabben. All rights reserved.
+Copyright (c) 2003-2011, CKSource - Frederico Knabben. All rights reserved.
 For licensing, see LICENSE.html or http://ckeditor.com/license
 */
 
 CKEDITOR.skins.add( 'office2003', (function()
 {
-	var preload = [];
-
-	if ( CKEDITOR.env.ie && CKEDITOR.env.version < 7 )
-	{
-		// For IE6, we need to preload some images, otherwhise they will be
-		// downloaded several times (CSS background bug).
-		preload.push( 'icons.png', 'images/sprites_ie6.png', 'images/dialog_sides.gif' );
-	}
-
 	return {
-		preload		: preload,
 		editor		: { css : [ 'editor.css' ] },
 		dialog		: { css : [ 'dialog.css' ] },
+		separator		: { canGroup: false },
 		templates	: { css : [ 'templates.css' ] },
 		margins		: [ 0, 14, 18, 14 ]
 	};
 })() );
 
-if ( CKEDITOR.dialog )
+(function()
 {
-	CKEDITOR.dialog.on( 'resize', function( evt )
-		{
-			var data = evt.data,
-				width = data.width,
-				height = data.height,
-				dialog = data.dialog,
-				standardsMode = !CKEDITOR.env.quirk;
+	CKEDITOR.dialog ? dialogSetup() : CKEDITOR.on( 'dialogPluginReady', dialogSetup );
 
-			if ( data.skin != 'office2003' )
-				return;
+	function dialogSetup()
+	{
+		CKEDITOR.dialog.on( 'resize', function( evt )
+			{
+				var data = evt.data,
+					width = data.width,
+					height = data.height,
+					dialog = data.dialog,
+					contents = dialog.parts.contents;
 
-			dialog.parts.contents.setStyles(
-				{
-					width : width + 'px',
-					height : height + 'px'
-				});
+				if ( data.skin != 'office2003' )
+					return;
 
-			if ( !CKEDITOR.env.ie )
-				return;
+				contents.setStyles(
+					{
+						width : width + 'px',
+						height : height + 'px'
+					});
 
-			// Fix the size of the elements which have flexible lengths.
-			var fixSize = function()
-				{
-					var content = dialog.parts.contents,
-						body = content.getParent(),
-						innerDialog = body.getParent();
+				if ( !CKEDITOR.env.ie || CKEDITOR.env.ie9Compat )
+					return;
 
-					// tc
-					var el = innerDialog.getChild( 2 );
-					el.setStyle( 'width', ( body.$.offsetWidth ) + 'px' );
+				// Fix the size of the elements which have flexible lengths.
+				var fixSize = function()
+					{
+						var innerDialog = dialog.parts.dialog.getChild( [ 0, 0, 0 ] ),
+							body = innerDialog.getChild( 0 ),
+							bodyWidth = body.getSize( 'width' );
+						height += body.getChild( 0 ).getSize( 'height' ) + 1;
 
-					// bc
-					el = innerDialog.getChild( 7 );
-					el.setStyle( 'width', ( body.$.offsetWidth - 28 ) + 'px' );
+						// tc
+						var el = innerDialog.getChild( 2 );
+						el.setSize( 'width', bodyWidth );
 
-					// ml
-					el = innerDialog.getChild( 4 );
-					el.setStyle( 'height', ( body.$.offsetHeight - 31 - 14 ) + 'px' );
+						// bc
+						el = innerDialog.getChild( 7 );
+						el.setSize( 'width', bodyWidth - 28 );
 
-					// mr
-					el = innerDialog.getChild( 5 );
-					el.setStyle( 'height', ( body.$.offsetHeight - 31 - 14 ) + 'px' );
-				};
-			setTimeout( fixSize, 100 );
+						// ml
+						el = innerDialog.getChild( 4 );
+						el.setSize( 'height', height );
 
-			// Ensure size is correct for RTL mode. (#4003)
-			if ( evt.editor.lang.dir == 'rtl' )
-				setTimeout( fixSize, 1000 );
-		});
-}
+						// mr
+						el = innerDialog.getChild( 5 );
+						el.setSize( 'height', height );
+					};
+				setTimeout( fixSize, 100 );
+
+				// Ensure size is correct for RTL mode. (#4003)
+				if ( evt.editor.lang.dir == 'rtl' )
+					setTimeout( fixSize, 1000 );
+			});
+	}
+})();

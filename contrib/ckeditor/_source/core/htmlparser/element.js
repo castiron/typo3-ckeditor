@@ -1,5 +1,5 @@
 ﻿/*
-Copyright (c) 2003-2009, CKSource - Frederico Knabben. All rights reserved.
+Copyright (c) 2003-2011, CKSource - Frederico Knabben. All rights reserved.
 For licensing, see LICENSE.html or http://ckeditor.com/license
 */
 
@@ -25,7 +25,7 @@ CKEDITOR.htmlParser.element = function( name, attributes )
 	 * @type Object
 	 * @example
 	 */
-	this.attributes = attributes;
+	this.attributes = attributes || ( attributes = {} );
 
 	/**
 	 * The nodes that are direct children of this element.
@@ -34,9 +34,20 @@ CKEDITOR.htmlParser.element = function( name, attributes )
 	 */
 	this.children = [];
 
+	var tagName = attributes[ 'data-cke-real-element-type' ] || name || '';
+
+	// Reveal the real semantic of our internal custom tag name (#6639).
+	var internalTag = tagName.match( /^cke:(.*)/ );
+  	internalTag && ( tagName = internalTag[ 1 ] );
+
 	var dtd			= CKEDITOR.dtd,
-		isBlockLike	= !!( dtd.$block[ name ] || dtd.$listItem[ name ] || dtd.$tableContent[ name ] ),
-		isEmpty		= !!dtd.$empty[ name ];
+		isBlockLike	= !!( dtd.$nonBodyContent[ tagName ]
+				|| dtd.$block[ tagName ]
+				|| dtd.$listItem[ tagName ]
+				|| dtd.$tableContent[ tagName ]
+				|| dtd.$nonEditable[ tagName ]
+				|| tagName == 'br' ),
+		isEmpty = !!dtd.$empty[ name ];
 
 	this.isEmpty	= isEmpty;
 	this.isUnknown	= !dtd[ name ];
@@ -46,6 +57,61 @@ CKEDITOR.htmlParser.element = function( name, attributes )
 	{
 		isBlockLike : isBlockLike,
 		hasInlineStarted : isEmpty || !isBlockLike
+	};
+};
+
+/**
+ *  Object presentation of  CSS style declaration text.
+ *  @param {CKEDITOR.htmlParser.element|String} elementOrStyleText A html parser element or the inline style text.
+ */
+CKEDITOR.htmlParser.cssStyle = function()
+{
+	 var styleText,
+		arg = arguments[ 0 ],
+		rules = {};
+
+	styleText = arg instanceof CKEDITOR.htmlParser.element ? arg.attributes.style : arg;
+
+	// html-encoded quote might be introduced by 'font-family'
+	// from MS-Word which confused the following regexp. e.g.
+	//'font-family: &quot;Lucida, Console&quot;'
+	( styleText || '' )
+		.replace( /&quot;/g, '"' )
+		.replace( /\s*([^ :;]+)\s*:\s*([^;]+)\s*(?=;|$)/g,
+			function( match, name, value )
+			{
+				name == 'font-family' && ( value = value.replace( /["']/g, '' ) );
+				rules[ name.toLowerCase() ] = value;
+			});
+
+	return {
+
+		rules : rules,
+
+		/**
+		 *  Apply the styles onto the specified element or object.
+		 * @param {CKEDITOR.htmlParser.element|CKEDITOR.dom.element|Object} obj
+		 */
+		populate : function( obj )
+		{
+			var style = this.toString();
+			if ( style )
+			{
+				obj instanceof CKEDITOR.dom.element ?
+					obj.setAttribute( 'style', style ) :
+					obj instanceof CKEDITOR.htmlParser.element ?
+						obj.attributes.style = style :
+						obj.style = style;
+			}
+		},
+
+		toString : function()
+		{
+			var output = [];
+			for ( var i in rules )
+				rules[ i ] && output.push( i, ':', rules[ i ], ';' );
+			return output.join( '' );
+		}
 	};
 };
 
@@ -99,18 +165,27 @@ CKEDITOR.htmlParser.element = function( name, attributes )
 		{
 			var attributes = this.attributes;
 
-			// The "_cke_replacedata" indicates that this element is replacing
-			// a data snippet, which should be outputted as is.
-			if ( attributes._cke_replacedata )
-			{
-				writer.write( attributes._cke_replacedata );
-				return;
-			}
-
 			// Ignore cke: prefixes when writing HTML.
 			var element = this,
 				writeName = element.name,
-				a, value;
+				a, newAttrName, value;
+
+			var isChildrenFiltered;
+
+			/**
+			 * Providing an option for bottom-up filtering order ( element
+			 * children to be pre-filtered before the element itself ).
+			 */
+			element.filterChildren = function()
+			{
+				if ( !isChildrenFiltered )
+				{
+					var writer = new CKEDITOR.htmlParser.basicWriter();
+					CKEDITOR.htmlParser.fragment.prototype.writeChildrenHtml.call( element, writer, filter );
+					element.children = new CKEDITOR.htmlParser.fragment.fromHtml( writer.getHtml(), 0, element.clone() ).children;
+					isChildrenFiltered = 1;
+				}
+			};
 
 			if ( filter )
 			{
@@ -124,13 +199,30 @@ CKEDITOR.htmlParser.element = function( name, attributes )
 					if ( !( element = filter.onElement( element ) ) )
 						return;
 
+					element.parent = this.parent;
+
 					if ( element.name == writeName )
 						break;
 
-					writeName = element.name;
-					if ( !writeName )	// Send children.
+					// If the element has been replaced with something of a
+					// different type, then make the replacement write itself.
+					if ( element.type != CKEDITOR.NODE_ELEMENT )
 					{
-						CKEDITOR.htmlParser.fragment.prototype.writeHtml.apply( element, arguments );
+						element.writeHtml( writer, filter );
+						return;
+					}
+
+					writeName = element.name;
+
+					// This indicate that the element has been dropped by
+					// filter but not the children.
+					if ( !writeName )
+					{
+						// Fix broken parent refs.
+						for ( var c = 0, length = this.children.length ; c < length ; c++ )
+							this.children[ c ].parent = element.parent;
+
+						this.writeChildrenHtml.call( element, writer, isChildrenFiltered ? null : filter );
 						return;
 					}
 				}
@@ -143,41 +235,56 @@ CKEDITOR.htmlParser.element = function( name, attributes )
 			// Open element tag.
 			writer.openTag( writeName, attributes );
 
-			if ( writer.sortAttributes )
+			// Copy all attributes to an array.
+			var attribsArray = [];
+			// Iterate over the attributes twice since filters may alter
+			// other attributes.
+			for ( var i = 0 ; i < 2; i++ )
 			{
-				// Copy all attributes to an array.
-				var attribsArray = [];
 				for ( a in attributes )
 				{
+					newAttrName = a;
 					value = attributes[ a ];
-
-					if ( filter && ( !( a = filter.onAttributeName( a ) ) || ( value = filter.onAttribute( element, a, value ) ) === false ) )
-						continue;
-
-					attribsArray.push( [ a, value ] );
-				}
-
-				// Sort the attributes by name.
-				attribsArray.sort( sortAttribs );
-
-				// Send the attributes.
-				for ( var i = 0, len = attribsArray.length ; i < len ; i++ )
-				{
-					var attrib = attribsArray[ i ];
-					writer.attribute( attrib[0], attrib[1] );
+					if ( i == 1 )
+						attribsArray.push( [ a, value ] );
+					else if ( filter )
+					{
+						while ( true )
+						{
+							if ( !( newAttrName = filter.onAttributeName( a ) ) )
+							{
+								delete attributes[ a ];
+								break;
+							}
+							else if ( newAttrName != a )
+							{
+								delete attributes[ a ];
+								a = newAttrName;
+								continue;
+							}
+							else
+								break;
+						}
+						if ( newAttrName )
+						{
+							if ( ( value = filter.onAttribute( element, newAttrName, value ) ) === false )
+								delete attributes[ newAttrName ];
+							else
+								attributes [ newAttrName ] = value;
+						}
+					}
 				}
 			}
-			else
+			// Sort the attributes by name.
+			if ( writer.sortAttributes )
+				attribsArray.sort( sortAttribs );
+
+			// Send the attributes.
+			var len = attribsArray.length;
+			for ( i = 0 ; i < len ; i++ )
 			{
-				for ( a in attributes )
-				{
-					value = attributes[ a ];
-
-					if ( filter && ( !( a = filter.onAttributeName( a ) ) || ( value = filter.onAttribute( element, a, value ) ) === false ) )
-						continue;
-
-					writer.attribute( a, value );
-				}
+				var attrib = attribsArray[ i ];
+				writer.attribute( attrib[0], attrib[1] );
 			}
 
 			// Close the tag.
@@ -185,12 +292,17 @@ CKEDITOR.htmlParser.element = function( name, attributes )
 
 			if ( !element.isEmpty )
 			{
-				// Send children.
-				CKEDITOR.htmlParser.fragment.prototype.writeHtml.apply( element, arguments );
-
+				this.writeChildrenHtml.call( element, writer, isChildrenFiltered ? null : filter );
 				// Close the element.
 				writer.closeTag( writeName );
 			}
+		},
+
+		writeChildrenHtml : function( writer, filter )
+		{
+			// Send children.
+			CKEDITOR.htmlParser.fragment.prototype.writeChildrenHtml.apply( this, arguments );
+
 		}
 	};
 })();

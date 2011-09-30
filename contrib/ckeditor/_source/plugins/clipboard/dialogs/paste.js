@@ -1,101 +1,72 @@
 ﻿/*
-Copyright (c) 2003-2009, CKSource - Frederico Knabben. All rights reserved.
+Copyright (c) 2003-2011, CKSource - Frederico Knabben. All rights reserved.
 For licensing, see LICENSE.html or http://ckeditor.com/license
 */
 
 CKEDITOR.dialog.add( 'paste', function( editor )
 {
+	var lang = editor.lang.clipboard;
 	var isCustomDomain = CKEDITOR.env.isCustomDomain();
 
+	function onPasteFrameLoad( win )
+	{
+		var doc = new CKEDITOR.dom.document( win.document ),
+			docElement = doc.$;
+
+		var script = doc.getById( 'cke_actscrpt' );
+		script && script.remove();
+
+		CKEDITOR.env.ie ?
+			docElement.body.contentEditable = "true" :
+			docElement.designMode = "on";
+
+		// IE before version 8 will leave cursor blinking inside the document after
+		// editor blurred unless we clean up the selection. (#4716)
+		if ( CKEDITOR.env.ie && CKEDITOR.env.version < 8 )
+		{
+			doc.getWindow().on( 'blur', function()
+			{
+				docElement.selection.empty();
+			} );
+		}
+
+		doc.on( "keydown", function( e )
+		{
+			var domEvent = e.data,
+				key = domEvent.getKeystroke(),
+				processed;
+
+			switch( key )
+			{
+				case 27 :
+					this.hide();
+					processed = 1;
+					break;
+
+				case 9 :
+				case CKEDITOR.SHIFT + 9 :
+					this.changeFocus( true );
+					processed = 1;
+			}
+
+			processed && domEvent.preventDefault();
+		}, this );
+
+		editor.fire( 'ariaWidget', new CKEDITOR.dom.element( win.frameElement ) );
+	}
+
 	return {
-		title : editor.lang.clipboard.title,
+		title : lang.title,
 
 		minWidth : CKEDITOR.env.ie && CKEDITOR.env.quirks ? 370 : 350,
 		minHeight : CKEDITOR.env.quirks ? 250 : 245,
-		htmlToLoad : '<!doctype html><script type="text/javascript">'
-				+ 'window.onload = function()'
-				+ '{'
-					+ 'if ( ' + CKEDITOR.env.ie + ' ) '
-						+ 'document.body.contentEditable = "true";'
-					+ 'else '
-						+ 'document.designMode = "on";'
-					+ 'var iframe = new window.parent.CKEDITOR.dom.element( frameElement );'
-					+ 'var dialog = iframe.getCustomData( "dialog" );'
-		      + ''
-					+ 'iframe.getFrameDocument().on( "keydown", function( e )\
-						{\
-							if ( e.data.getKeystroke() == 27 )\
-								dialog.hide();\
-						});'
-				+ '};'
-				+ '</script><style>body { margin: 3px; height: 95%; } </style><body></body>',
-
 		onShow : function()
 		{
-			if ( CKEDITOR.env.ie )
-				this.getParentEditor().document.getBody().$.contentEditable = 'false';
-
 			// FIREFOX BUG: Force the browser to render the dialog to make the to-be-
 			// inserted iframe editable. (#3366)
 			this.parts.dialog.$.offsetHeight;
 
-			var container = this.getContentElement( 'general', 'editing_area' ).getElement(),
-				iframe = CKEDITOR.dom.element.createFromHtml( '<iframe src="javascript:void(0)" frameborder="0" allowtransparency="1"></iframe>' );
-
-			var lang = this.getParentEditor().lang;
-
-			iframe.setStyles(
-				{
-					width : '346px',
-					height : '130px',
-					'background-color' : 'white',
-					border : '1px solid black'
-				} );
-			iframe.setCustomData( 'dialog', this );
-
-			var accTitle = lang.editorTitle.replace( '%1', lang.clipboard.title );
-
-			if ( CKEDITOR.env.ie )
-				container.setHtml( '<legend style="position:absolute;top:-1000000px;left:-1000000px;">'
-						+ CKEDITOR.tools.htmlEncode( accTitle )
-						+ '</legend>' );
-			else
-			{
-				container.setHtml( '' );
-				container.setAttributes(
-					{
-						role : 'region',
-						title : accTitle
-					} );
-				iframe.setAttributes(
-					{
-						role : 'region',
-						title : ' '
-					} );
-			}
-			container.append( iframe );
-			if ( CKEDITOR.env.ie )
-				container.setStyle( 'height', ( iframe.$.offsetHeight + 2 ) + 'px' );
-
-			if ( isCustomDomain )
-			{
-				CKEDITOR._cke_htmlToLoad = this.definition.htmlToLoad;
-				iframe.setAttribute( 'src',
-					'javascript:void( (function(){' +
-						   'document.open();' +
-						   'document.domain="' + document.domain + '";' +
-						   'document.write( window.parent.CKEDITOR._cke_htmlToLoad );' +
-						   'delete window.parent.CKEDITOR._cke_htmlToLoad;' +
-						   'document.close();' +
-					'})() )' );
-			}
-			else
-			{
-				var doc = iframe.$.contentWindow.document;
-				doc.open();
-				doc.write( this.definition.htmlToLoad );
-				doc.close();
-			}
+			this.setupContent();
 		},
 
 		onHide : function()
@@ -112,15 +83,7 @@ CKEDITOR.dialog.add( 'paste', function( editor )
 
 		onOk : function()
 		{
-			var container = this.getContentElement( 'general', 'editing_area' ).getElement(),
-				iframe = container.getElementsByTag( 'iframe' ).getItem( 0 ),
-				editor = this.getParentEditor(),
-				html = iframe.$.contentWindow.document.body.innerHTML;
-
-			setTimeout( function(){
-				editor.insertHtml( html );
-			}, 0 );
-
+			this.commitContent();
 		},
 
 		contents : [
@@ -131,33 +94,126 @@ CKEDITOR.dialog.add( 'paste', function( editor )
 					{
 						type : 'html',
 						id : 'securityMsg',
-						html : '<div style="white-space:normal;width:340px;">' + editor.lang.clipboard.securityMsg + '</div>'
+						html : '<div style="white-space:normal;width:340px;">' + lang.securityMsg + '</div>'
 					},
 					{
 						type : 'html',
 						id : 'pasteMsg',
-						html : '<div style="white-space:normal;width:340px;">'+editor.lang.clipboard.pasteMsg +'</div>'
+						html : '<div style="white-space:normal;width:340px;">'+lang.pasteMsg +'</div>'
 					},
 					{
 						type : 'html',
 						id : 'editing_area',
 						style : 'width: 100%; height: 100%;',
-						html : '<fieldset></fieldset>',
+						html : '',
 						focus : function()
 						{
-							var div = this.getElement();
-							var iframe = div.getElementsByTag( 'iframe' );
-							if ( iframe.count() < 1 )
-								return;
-							iframe = iframe.getItem( 0 );
+							var win = this.getInputElement().$.contentWindow;
 
 							// #3291 : JAWS needs the 500ms delay to detect that the editor iframe
 							// iframe is no longer editable. So that it will put the focus into the
 							// Paste from Word dialog's editable area instead.
 							setTimeout( function()
 							{
-								iframe.$.contentWindow.focus();
+								win.focus();
 							}, 500 );
+						},
+						setup : function()
+						{
+							var dialog = this.getDialog();
+							var htmlToLoad =
+								'<html dir="' + editor.config.contentsLangDirection + '"' +
+								' lang="' + ( editor.config.contentsLanguage || editor.langCode ) + '">' +
+								'<head><style>body { margin: 3px; height: 95%; } </style></head><body>' +
+								'<script id="cke_actscrpt" type="text/javascript">' +
+								'window.parent.CKEDITOR.tools.callFunction( ' + CKEDITOR.tools.addFunction( onPasteFrameLoad, dialog ) + ', this );' +
+								'</script></body>' +
+								'</html>';
+
+							var src =
+								CKEDITOR.env.air ?
+									'javascript:void(0)' :
+								isCustomDomain ?
+									'javascript:void((function(){' +
+										'document.open();' +
+										'document.domain=\'' + document.domain + '\';' +
+										'document.close();' +
+									'})())"'
+								:
+									'';
+
+							var iframe = CKEDITOR.dom.element.createFromHtml(
+								'<iframe' +
+									' class="cke_pasteframe"' +
+									' frameborder="0" ' +
+									' allowTransparency="true"' +
+									' src="' + src + '"' +
+									' role="region"' +
+									' aria-label="' + lang.pasteArea + '"' +
+									' aria-describedby="' + dialog.getContentElement( 'general', 'pasteMsg' ).domId + '"' +
+									' aria-multiple="true"' +
+									'></iframe>' );
+
+							iframe.on( 'load', function( e )
+							{
+								e.removeListener();
+
+								var doc = iframe.getFrameDocument();
+								doc.write( htmlToLoad );
+
+								if ( CKEDITOR.env.air )
+									onPasteFrameLoad.call( this, doc.getWindow().$ );
+							}, dialog );
+
+							iframe.setCustomData( 'dialog', dialog );
+
+							var container = this.getElement();
+							container.setHtml( '' );
+							container.append( iframe );
+
+							// IE need a redirect on focus to make
+							// the cursor blinking inside iframe. (#5461)
+							if ( CKEDITOR.env.ie )
+							{
+								var focusGrabber = CKEDITOR.dom.element.createFromHtml( '<span tabindex="-1" style="position:absolute;" role="presentation"></span>' );
+								focusGrabber.on( 'focus', function()
+								{
+									iframe.$.contentWindow.focus();
+								});
+								container.append( focusGrabber );
+
+								// Override focus handler on field.
+								this.focus = function()
+								{
+									focusGrabber.focus();
+									this.fire( 'focus' );
+								};
+							}
+
+							this.getInputElement = function(){ return iframe; };
+
+							// Force container to scale in IE.
+							if ( CKEDITOR.env.ie )
+							{
+								container.setStyle( 'display', 'block' );
+								container.setStyle( 'height', ( iframe.$.offsetHeight + 2 ) + 'px' );
+							}
+						},
+						commit : function( data )
+						{
+							var container = this.getElement(),
+								editor = this.getDialog().getParentEditor(),
+								body = this.getInputElement().getFrameDocument().getBody(),
+								bogus = body.getBogus(),
+								html;
+							bogus && bogus.remove();
+
+							// Saving the contents so changes until paste is complete will not take place (#7500)
+							html = body.getHtml();
+
+							setTimeout( function(){
+								editor.fire( 'paste', { 'html' : html } );
+							}, 0 );
 						}
 					}
 				]

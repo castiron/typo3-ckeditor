@@ -2,21 +2,9 @@
 
 class jsonPageTreeListener {
 
-	function getIcon($row) {
-		global $PAGES_TYPES;
-		if ($row['nav_hide'] && ($row['doktype']==1||$row['doktype']==2)) $row['doktype'] = 5;  // Workaround to change the icon if "Hide in menu" was set
-		if (!$iconfile = $PAGES_TYPES[$row['doktype']]['icon']) {
-			$iconfile = $PAGES_TYPES['default']['icon'];
-		}
-		if ($row['module'] && $ICON_TYPES[$row['module']]['icon']) {
-			$iconfile = $ICON_TYPES[$row['module']]['icon'];
-		}
-		if (!strstr($iconfile, '/')) {
-			$iconfile = 'gfx/i/'.$iconfile;
-		}
-		$icon = t3lib_iconWorks::skinImg($GLOBALS['BACK_PATH'],$iconfile,'',1);
-		$icon = '/typo3/'.$icon;
-		return $icon;
+	function getIconClass($row) {
+		$class = t3lib_iconWorks::getSpriteIconForRecord('pages',$row);
+		return $class;
 	}
 	
 	function pathCheck($pid) {
@@ -60,11 +48,11 @@ class jsonPageTreeListener {
 
 		foreach($this->tree->tree as $element) {
 			$rec = $element['row'];
-			$icon = $this->getIcon($rec);
+			$icon = $this->getIconClass($rec);
 			$obj = new stdClass;
 			
 			if(!$element['hasSub']) $obj->leaf = true;
-			$obj->icon = $icon;
+			$obj->iconClass = $icon;
 			$obj->draggable = false;
 			$obj->editable = false;
 			$obj->qtip = 'uid: '.$rec['uid'];
