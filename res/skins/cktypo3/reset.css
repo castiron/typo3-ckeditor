@@ -12,24 +12,7 @@ For licensing, see LICENSE.html or http://ckeditor.com/license
 .cke_skin_cktypo3 a:visited,
 .cke_skin_cktypo3 a:active
 {
-	margin: 0;
-	padding: 0;
-	border: 0;
-	background: transparent;
-	text-decoration: none;
-	font: normal normal normal 100% Sans-Serif;
-	width: auto;
-	height: auto;
-	border-collapse: collapse;
-	text-align: left;
-	vertical-align: baseline;
-	white-space: nowrap;
-	cursor: auto;
-	color: #000;
-	float: none;
 
-    font-size: 12px;
-    font-family: Arial,Helvetica,Tahoma,Verdana,Sans-Serif;
 }
 
 .cke_skin_cktypo3 .cke_rtl *,

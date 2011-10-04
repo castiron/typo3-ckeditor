@@ -36,7 +36,7 @@ require_once(PATH_t3lib.'class.t3lib_cs.php');
 
 class tx_ckeditor_base extends t3lib_rteapi {
 		
-	var $debug = true;
+	var $debug = false;
 	var $disableRTE = false;	
 	var $debugMessages = array();
 	var $parentObj = false;
@@ -88,15 +88,15 @@ class tx_ckeditor_base extends t3lib_rteapi {
 		'NumberedList' => array('avail' => 1,'map' => 'orderedList'),
 		'BulletedList' => array('avail' => 1,'map' => 'unorderedList'),
 		'Outdent' => array('avail' => 1,'map' => 'outdent'),
-		't3ImageBtn' => array(
-			'avail' => 1,
-			'dialog' => array(
-				'key' => 't3Image',
-				'file' => 'EXT:ckeditor/lib/js/t3image.js',
-				'label' => 'Image',
-				'css' => '.cke_button_t3ImageCmd .cke_icon { display: block; background-position: 0 -576px !important;}'
-			)
-		),
+		// 't3ImageBtn' => array(
+		// 	'avail' => 1,
+		// 	'dialog' => array(
+		// 		'key' => 't3Image',
+		// 		'file' => 'EXT:ckeditor/lib/js/t3image.js',
+		// 		'label' => 'Image',
+		// 		'css' => '.cke_button_t3ImageCmd .cke_icon { display: block; background-position: 0 -576px !important;}'
+		// 	)
+		// ),
 		'Indent' => array('avail' => 1,'map' => 'indent'),
 		'Blockquote' => array('avail' => 1,'map' => 'blockquote'),
 		'JustifyLeft' => array('avail' => 1,'map' => 'left'),
@@ -500,6 +500,7 @@ class tx_ckeditor_base extends t3lib_rteapi {
 					contentsCss : '".$styleSheetInclude."',
 					skin : '".$skinName.",".$skinPath."',
 					stylesCombo_stylesSet : 'styleTest',
+					removePlugins : 'link',
 					filebrowserBrowseUrl : '/typo3/mod.php?M=web_txckeditorM1&action=fileBrowse',
 			        filebrowserWindowWidth : '700',
 			        filebrowserWindowHeight : '700',
@@ -528,8 +529,6 @@ class tx_ckeditor_base extends t3lib_rteapi {
 		return $out;	
 	}
 	
-
-
 	function includeJsFile($path) {
 		$this->log('Including JS File: '.$path,'MESSAGE');
 		$hash = md5($path);
@@ -576,9 +575,22 @@ class tx_ckeditor_base extends t3lib_rteapi {
 	}
 	
 	function includeJsCkeditor() {
+
+		$this->includeJsFile('t3lib/js/extjs/components/pagetree/javascript/treeeditor.js');
+		$this->includeJsFile('EXT:ckeditor/lib/js/tree/ckTree.js');
+		$this->includeJsFile('t3lib/js/extjs/components/pagetree/javascript/filteringtree.js');
+		$this->includeJsFile('EXT:ckeditor/lib/js/tree/ckNodeUi.js');
+		$this->includeJsFile('t3lib/js/extjs/components/pagetree/javascript/deletiondropzone.js');
+		$this->includeJsFile('t3lib/js/extjs/components/pagetree/javascript/toppanel.js');
+		$this->includeJsFile('t3lib/js/extjs/components/pagetree/javascript/contextmenu.js');
+		$this->includeJsFile('t3lib/js/extjs/components/pagetree/javascript/actions.js');
+		$this->includeJsFile('t3lib/js/extjs/components/pagetree/javascript/Ext.ux.state.TreePanel.js');
+		$this->includeJsFile('EXT:ckeditor/lib/js/tree/ckApp.js');
 		$this->includeJsFile('EXT:ckeditor/contrib/ckeditor/ckeditor.js');
-		$this->includeJsFile('EXT:ckeditor/contrib/extJS/pkgs/pkg-tree.js');
-		$this->includeJsFile('EXT:ckeditor/contrib/extJS/XmlTreeLoader.js');		
+
+
+#		$this->includeJsFile('EXT:ckeditor/contrib/extJS/pkgs/pkg-tree.js');
+#		$this->includeJsFile('EXT:ckeditor/contrib/extJS/XmlTreeLoader.js');		
 	}
 
 	function includeCssCkeditor() {
